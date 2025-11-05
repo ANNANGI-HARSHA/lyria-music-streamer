@@ -37,12 +37,16 @@ python app.py
 Troubleshooting
 - If the server complains about missing packages, ensure you activated the virtual environment.
 - If WebSocket connections fail, try installing/upgrading `gevent` or `eventlet` and restart the server.
-- If the app prints `GEMINI_API_KEY not found`, confirm `.env` exists and contains the correct key.
 
 Files of interest
-- `app.py` — Flask app and WebSocket handler
 - `index.html` — Front-end UI that connects to `/ws`
 - `lyria-test-app.py` — A helper script to test direct GenAI streaming from the terminal
 
+
+MCP server
+----------
+
+This repo contains a minimal local MCP server stub under `mcp_server/`.
+Start it with `python -m mcp_server.server` and POST to `/mcp/infer` to test the integration during development.
 Contact
 If you want, I can try to install dependencies and start the server for you now. If so, tell me whether it's OK to run installation commands in the workspace environment.
