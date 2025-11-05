@@ -1,41 +1,111 @@
-"""Pluggable model backend for the MCP server.
+"""Pluggable model backend for the MCP server with Gemini integration.
 
 This module exposes `generate(prompt)` which will:
-- If `GEMINI_API_KEY` and `GEMINI_API_URL` are set in the environment, POST the prompt
-  to that URL with Authorization Bearer header and return the parsed JSON response (or a
-  simple mapping).
-- Otherwise fall back to a local dummy response (the previous behaviour).
+- If `GEMINI_API_KEY` is set in the environment, POST the prompt to the Gemini Pro
+  endpoint with proper request format and parse the response.
+- Otherwise fall back to a local dummy response (for development/testing).
 
-This implementation uses only the Python standard library so no extra dependencies are
-required. Configure `GEMINI_API_URL` to the correct Gemini endpoint (example below).
+Example Gemini request:
+{
+    "contents": [{
+        "parts": [{
+            "text": "your prompt here"
+        }]
+    }]
+}
+
+Example Gemini response:
+{
+    "candidates": [{
+        "content": {
+            "parts": [{
+                "text": "generated response"
+            }]
+        }
+    }]
+}
+
+This implementation uses only the Python standard library. Set GEMINI_API_KEY in your
+environment or .env file to enable Gemini integration.
 """
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import os
 import json
 import urllib.request
 import urllib.error
 
+# Default Gemini Pro endpoint if none specified
+DEFAULT_GEMINI_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent"
 
-def _call_gemini(prompt: str) -> Dict[str, Any]:
+
+def _call_gemini(prompt: str, *, temperature: float = 0.7) -> Dict[str, Any]:
+    """Call the Gemini API with proper request format and response parsing.
+    
+    Args:
+        prompt: The text prompt to send to Gemini
+        temperature: Generation temperature (0.0 = deterministic, 1.0 = creative)
+    
+    Returns:
+        Dict with 'output' (generated text) and 'meta' (response details)
+    
+    Raises:
+        RuntimeError: If API call fails or response format is invalid
+    """
     api_key = os.environ.get("GEMINI_API_KEY")
-    api_url = os.environ.get("GEMINI_API_URL")
-    if not api_key or not api_url:
-        raise RuntimeError("GEMINI_API_KEY or GEMINI_API_URL not configured")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY not configured in environment")
 
-    payload = {"prompt": prompt}
+    api_url = os.environ.get("GEMINI_API_URL", DEFAULT_GEMINI_URL)
+    if "?" not in api_url:  # Add API key as query param if not in URL
+        api_url = f"{api_url}?key={api_key}"
+
+    # Format request per Gemini API spec
+    payload = {
+        "contents": [{
+            "parts": [{
+                "text": prompt
+            }]
+        }],
+        "generationConfig": {
+            "temperature": temperature,
+            "candidateCount": 1,
+        }
+    }
     data = json.dumps(payload).encode("utf-8")
+    
     req = urllib.request.Request(api_url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {api_key}")
 
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8")
             try:
-                return json.loads(raw)
-            except Exception:
-                # If the API returns plain text, wrap it.
-                return {"output": raw}
+                response = json.loads(raw)
+                
+                # Extract text from Gemini response format
+                if (
+                    "candidates" in response
+                    and response["candidates"]
+                    and "content" in response["candidates"][0]
+                    and "parts" in response["candidates"][0]["content"]
+                    and response["candidates"][0]["content"]["parts"]
+                    and "text" in response["candidates"][0]["content"]["parts"][0]
+                ):
+                    return {
+                        "output": response["candidates"][0]["content"]["parts"][0]["text"],
+                        "meta": {
+                            "model": "gemini-pro",
+                            "temperature": temperature,
+                            **response.get("promptFeedback", {}),
+                        }
+                    }
+                else:
+                    raise RuntimeError(f"Unexpected Gemini response format: {response}")
+                    
+            except json.JSONDecodeError:
+                # If API returns non-JSON (shouldn't happen), wrap it
+                return {"output": raw, "meta": {"error": "non-json-response"}}
+                
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8") if e.fp else ""
         raise RuntimeError(f"Gemini API HTTPError: {e.code} {e.reason} - {body}")
@@ -43,28 +113,46 @@ def _call_gemini(prompt: str) -> Dict[str, Any]:
         raise RuntimeError(f"Failed to call Gemini API: {e}")
 
 
-def generate(prompt: str) -> Dict[str, Any]:
+def generate(
+    prompt: str,
+    *,
+    temperature: Optional[float] = None,
+    use_dummy: bool = False
+) -> Dict[str, Any]:
     """Generate a response for the given prompt.
 
-    If GEMINI_API_KEY and GEMINI_API_URL are configured, call Gemini. Otherwise return a
-    local dummy response.
-    """
-    try:
-        if os.environ.get("GEMINI_API_KEY") and os.environ.get("GEMINI_API_URL"):
-            resp = _call_gemini(prompt)
-            # Normalize possible shapes into {"output": str, "meta": {...}}
-            if isinstance(resp, dict):
-                if "output" in resp:
-                    return {"output": resp["output"], "meta": resp.get("meta", {})}
-                # Guess shape where text is under 'text' or 'result'
-                for key in ("text", "result", "content"):
-                    if key in resp and isinstance(resp[key], str):
-                        return {"output": resp[key], "meta": resp.get("meta", {})}
-                # Otherwise return stringified whole response
-                return {"output": json.dumps(resp), "meta": {}}
-    except Exception as e:
-        # If remote call fails, fall back to dummy but include error meta.
-        return {"output": f"[mcp-server-dummy-fallback] {prompt}", "meta": {"error": str(e)}}
+    If GEMINI_API_KEY is configured and use_dummy=False, calls the Gemini API.
+    Otherwise returns a local dummy response.
 
-    # Default dummy response
-    return {"output": f"[mcp-server-dummy] {prompt}", "meta": {"length": len(prompt)}}
+    Args:
+        prompt: Text prompt to send to the model
+        temperature: Optional temperature (0.0-1.0) for generation
+        use_dummy: If True, always use dummy backend (for testing)
+
+    Returns:
+        Dict with 'output' (generated text) and 'meta' (response details)
+    """
+    if not use_dummy and os.environ.get("GEMINI_API_KEY"):
+        try:
+            return _call_gemini(
+                prompt,
+                temperature=temperature if temperature is not None else 0.7
+            )
+        except Exception as e:
+            # If remote call fails, fall back to dummy but include error
+            return {
+                "output": f"[mcp-server-dummy-fallback] {prompt}",
+                "meta": {
+                    "error": str(e),
+                    "backend": "gemini-pro",
+                }
+            }
+
+    # Default dummy response (for development/testing)
+    return {
+        "output": f"[mcp-server-dummy] {prompt}",
+        "meta": {
+            "length": len(prompt),
+            "backend": "dummy",
+        }
+    }
