@@ -58,9 +58,8 @@
             line-height: 1.5;
             margin: 0;
         }
-        textarea {
+        textarea, input[type="number"] {
             width: 100%;
-            min-height: 100px;
             box-sizing: border-box;
             padding: 14px;
             border: 1px solid #ddd;
@@ -71,7 +70,10 @@
             resize: vertical;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-        textarea:focus {
+        textarea {
+            min-height: 100px;
+        }
+        textarea:focus, input[type="number"]:focus {
             outline: none;
             border-color: var(--primary-color);
             box-shadow: 0 0 0 3px rgba(106, 17, 203, 0.15);
@@ -100,7 +102,7 @@
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
         button:disabled {
-            background-color: #aaa;
+            background: #aaa;
             cursor: not-allowed;
             opacity: 0.7;
         }
@@ -115,16 +117,6 @@
         #generate-btn {
             background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
             color: white;
-        }
-
-        /* --- New Recording Button Styles --- */
-        #start-record-btn {
-            background: linear-gradient(135deg, var(--red-color) 0%, #ff6b6b 100%);
-            color: white;
-        }
-        #stop-record-btn {
-            background: linear-gradient(135deg, var(--yellow-color) 0%, #ffc107 100%);
-            color: #333;
         }
         .hidden { display: none; }
         
@@ -162,7 +154,6 @@
             font-weight: 500;
         }
 
-        /* --- New Results Section Styles --- */
         #results-container {
             margin-top: 2rem;
             border-top: 1px solid #eee;
@@ -217,7 +208,7 @@
     <div class="container">
         <div class="header">
             <h1>Lyria <span>Realtime</span></h1>
-            <p>Connect to the server and send prompts to generate a live, continuous stream of music.</p>
+            <p>Connect to the server, set a duration, and send a prompt to generate and record a clip.</p>
         </div>
         
         <div id="connect-container">
@@ -227,14 +218,11 @@
         <div id="controls-container" class="hidden">
             <label for="prompt-input" style="text-align: left; display: block; font-weight: 500; color: var(--text-color);">Your Prompt:</label>
             <textarea id="prompt-input" placeholder="e.g., A cinematic, orchestral score with rising strings and triumphant brass."></textarea>
-            <button id="generate-btn">Update Prompt</button>
             
-            <hr>
-
-            <div id="record-controls">
-                <button id="start-record-btn">Start Recording</button>
-                <button id="stop-record-btn" class="hidden">Stop Recording</button>
-            </div>
+            <label for="duration-input" style="text-align: left; display: block; font-weight: 500; color: var(--text-color); margin-top: 15px;">Duration (in seconds):</label>
+            <input type="number" id="duration-input" value="10" min="1">
+            
+            <button id="generate-btn">Generate & Record</button>
             
             <hr>
             
@@ -262,8 +250,9 @@
         let nextPlayTime = 0;
         const AUDIO_SAMPLE_RATE = 48000; // Lyria streams at 48kHz
 
-        // --- New Recording Variables ---
+        // --- NEW Recording Variables ---
         let isRecording = false;
+        let recordingTimer = null; // To store the setTimeout
         let recordedBuffers = [];
         let currentAudioUrl = null;
 
@@ -277,9 +266,8 @@
         const connectContainer = document.getElementById('connect-container');
         const controlsContainer = document.getElementById('controls-container');
 
-        // --- New DOM Elements ---
-        const startRecordBtn = document.getElementById('start-record-btn');
-        const stopRecordBtn = document.getElementById('stop-record-btn');
+        // --- NEW DOM Elements ---
+        const durationInput = document.getElementById('duration-input'); // Added
         const resultsContainer = document.getElementById('results-container');
         const audioPlayback = document.getElementById('audio-playback');
         const downloadLink = document.getElementById('download-link');
@@ -328,7 +316,7 @@
             socket.binaryType = "arraybuffer";
 
             socket.onopen = (event) => {
-                statusText.textContent = "Connected! Send a prompt to start.";
+                statusText.textContent = "Connected! Set prompt and duration.";
                 statusIndicator.className = 'connected';
                 connectContainer.classList.add('hidden');
                 controlsContainer.classList.remove('hidden');
@@ -336,20 +324,15 @@
 
             socket.onmessage = (event) => {
                 if (typeof event.data === "string") {
-                    // This is a text message (e.g., an error from the server)
                     statusText.textContent = event.data;
                     statusIndicator.className = 'error';
                 } else {
-                    // This is raw audio data (ArrayBuffer)
                     const pcm16Data = event.data;
                     
-                    // --- NEW: Store for recording if active ---
                     if (isRecording) {
-                        // Store the raw ArrayBuffer. It's more efficient.
                         recordedBuffers.push(pcm16Data);
                     }
 
-                    // --- Process for live playback ---
                     const rawPcm16 = new Int16Array(pcm16Data);
                     const pcmFloat32 = new Float32Array(rawPcm16.length);
                     for (let i = 0; i < rawPcm16.length; i++) {
@@ -365,12 +348,12 @@
                 statusIndicator.className = '';
                 connectContainer.classList.remove('hidden');
                 controlsContainer.classList.add('hidden');
-                resultsContainer.classList.add('hidden'); // Hide results on disconnect
+                resultsContainer.classList.add('hidden');
                 socket = null;
                 audioQueue = []; 
                 if (isRecording) {
                     // If we were recording, stop and process the file
-                    stopRecording();
+                    processRecording();
                 }
             };
 
@@ -381,37 +364,27 @@
             };
         }
 
-        // --- NEW: Recording Logic ---
-        function startRecording() {
-            isRecording = true;
-            recordedBuffers = []; // Clear previous recording
+        /**
+         * NEW: Stops recording, processes audio, and updates UI
+         * This logic was moved from the old stopRecording button
+         */
+        function processRecording() {
+            isRecording = false; // Stop recording
             
-            // Clear previous results
-            resultsContainer.classList.add('hidden');
-            if (currentAudioUrl) {
-                URL.revokeObjectURL(currentAudioUrl);
-                currentAudioUrl = null;
+            // Clear the timer just in case
+            if (recordingTimer) {
+                clearTimeout(recordingTimer);
+                recordingTimer = null;
             }
-            audioPlayback.src = '';
             
             // Update UI
-            startRecordBtn.classList.add('hidden');
-            stopRecordBtn.classList.remove('hidden');
-            statusText.textContent = "Recording... Send prompts to add music.";
-            statusIndicator.className = 'recording';
-        }
-
-        function stopRecording() {
-            isRecording = false;
-            
-            // Update UI
-            startRecordBtn.classList.remove('hidden');
-            stopRecordBtn.classList.add('hidden');
+            generateBtn.disabled = false;
+            generateBtn.textContent = 'Generate & Record';
             statusText.textContent = "Connected. Processing recording...";
-            statusIndicator.className = 'connected'; // Back to connected state
+            statusIndicator.className = 'connected';
 
             if (recordedBuffers.length === 0) {
-                statusText.textContent = "Recording stopped. No audio was captured.";
+                statusText.textContent = "Recording finished. No audio was captured.";
                 return;
             }
 
@@ -419,29 +392,21 @@
             const pcmBlob = new Blob(recordedBuffers, { type: 'application/octet-stream' });
             console.log(`PCM Blob size: ${pcmBlob.size} bytes`);
 
-            // Encode the raw PCM blob into a WAV blob
             const wavBlob = encodeWAV(pcmBlob, AUDIO_SAMPLE_RATE, 2, 16);
             console.log(`WAV Blob size: ${wavBlob.size} bytes`);
             
-            // Create a playable URL for the WAV blob
             currentAudioUrl = URL.createObjectURL(wavBlob);
             
-            // Update the results player and download link
             audioPlayback.src = currentAudioUrl;
             downloadLink.href = currentAudioUrl;
             
-            // Show the results
             resultsContainer.classList.remove('hidden');
             statusText.textContent = "Recording finished and ready for playback.";
         }
 
+
         /**
          * Encodes a raw PCM data Blob into a WAV file Blob.
-         * @param {Blob} pcmBlob - The Blob containing raw PCM data.
-         * @param {number} sampleRate - The sample rate (e.g., 48000).
-         * @param {number} numChannels - Number of channels (e.g., 2 for stereo).
-         * @param {number} bitsPerSample - Bits per sample (e.g., 16).
-         * @returns {Blob} A new Blob containing the complete WAV file.
          */
         function encodeWAV(pcmBlob, sampleRate, numChannels, bitsPerSample) {
             const pcmDataSize = pcmBlob.size;
@@ -449,39 +414,30 @@
             const blockAlign = numChannels * bytesPerSample;
             const byteRate = sampleRate * blockAlign;
             const wavHeaderSize = 44;
-            
             const totalFileSize = wavHeaderSize + pcmDataSize;
-            
             const buffer = new ArrayBuffer(wavHeaderSize);
             const view = new DataView(buffer);
 
-            // RIFF chunk descriptor
             writeString(view, 0, 'RIFF');
-            view.setUint32(4, totalFileSize - 8, true); // (file size - 8)
+            view.setUint32(4, totalFileSize - 8, true);
             writeString(view, 8, 'WAVE');
-            
-            // "fmt " sub-chunk
             writeString(view, 12, 'fmt ');
-            view.setUint32(16, 16, true); // Sub-chunk size (16 for PCM)
-            view.setUint16(20, 1, true); // Audio format (1 for PCM)
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
             view.setUint16(22, numChannels, true);
             view.setUint32(24, sampleRate, true);
             view.setUint32(28, byteRate, true);
             view.setUint16(32, blockAlign, true);
             view.setUint16(34, bitsPerSample, true);
-            
-            // "data" sub-chunk
             writeString(view, 36, 'data');
             view.setUint32(40, pcmDataSize, true);
 
-            // Helper function to write a string to the DataView
             function writeString(view, offset, string) {
                 for (let i = 0; i < string.length; i++) {
                     view.setUint8(offset + i, string.charCodeAt(i));
                 }
             }
             
-            // Return a new Blob combining the header and the PCM data
             return new Blob([buffer, pcmBlob], { type: 'audio/wav' });
         }
 
@@ -499,30 +455,59 @@
             }
         });
 
+        /**
+         * MODIFIED: This button now starts the prompt AND the recording timer.
+         */
         generateBtn.addEventListener('click', () => {
             const prompt = promptInput.value;
+            const duration = parseInt(durationInput.value, 10);
+
             if (!prompt) {
                 alert('Please enter a prompt.');
                 return;
             }
+            if (isNaN(duration) || duration <= 0) {
+                alert('Please enter a valid duration (in seconds).');
+                return;
+            }
             if (socket && socket.readyState === WebSocket.OPEN) {
-                statusText.textContent = "Sending new prompt...";
-                statusIndicator.className = isRecording ? 'recording' : 'connecting'; // Show activity
+                
+                // --- Start Recording ---
+                isRecording = true;
+                recordedBuffers = []; // Clear previous recording
+                
+                resultsContainer.classList.add('hidden');
+                if (currentAudioUrl) {
+                    URL.revokeObjectURL(currentAudioUrl);
+                    currentAudioUrl = null;
+                }
+                audioPlayback.src = '';
+                
+                // Update UI
+                statusText.textContent = `Recording for ${duration} seconds...`;
+                statusIndicator.className = 'recording';
+                generateBtn.disabled = true;
+                generateBtn.textContent = 'Recording...';
+                
+                // Send prompt to server
                 socket.send(prompt);
                 
-                setTimeout(() => {
-                    if (socket && socket.readyState === WebSocket.OPEN) {
-                        const newStatus = isRecording ? "Recording new prompt..." : "Connected. Streaming new prompt...";
-                        statusText.textContent = newStatus;
-                        statusIndicator.className = isRecording ? 'recording' : 'connected';
-                    }
-                }, 1500);
+                // --- Set Timer to Stop Recording ---
+                if (recordingTimer) {
+                    clearTimeout(recordingTimer);
+                }
+                
+                recordingTimer = setTimeout(() => {
+                    console.log(`Timer fired after ${duration}s. Processing recording.`);
+                    processRecording(); // This function stops recording and processes the file
+                }, duration * 1000); // Convert seconds to milliseconds
+
+            } else {
+                alert('Not connected to the server.');
             }
         });
 
-        // --- New Event Listeners ---
-        startRecordBtn.addEventListener('click', startRecording);
-        stopRecordBtn.addEventListener('click', stopRecording);
+        // --- REMOVED Event Listeners for start/stop buttons ---
 
     </script>
 </body>
