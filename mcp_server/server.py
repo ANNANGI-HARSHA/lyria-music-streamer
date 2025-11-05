@@ -7,6 +7,9 @@ local stub MCP server you can extend later or deploy.
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import argparse
+import os
+
+from . import backend
 
 
 class MCPHandler(BaseHTTPRequestHandler):
@@ -32,13 +35,19 @@ class MCPHandler(BaseHTTPRequestHandler):
 
         prompt = payload.get("prompt", "")
 
-        # Simple dummy behavior: echo the prompt with a prefix.
-        result = {
-            "output": f"[mcp-server-dummy] {prompt}",
-            "meta": {"length": len(prompt)}
-        }
+        # Use the pluggable backend (Gemini if configured, otherwise dummy)
+        try:
+            gen = backend.generate(prompt)
+            if isinstance(gen, dict) and "output" in gen:
+                result = gen
+            else:
+                result = {"output": str(gen), "meta": {}}
+            status = 200
+        except Exception as e:
+            result = {"error": "backend_error", "details": str(e)}
+            status = 500
 
-        self._set_headers(200)
+        self._set_headers(status)
         self.wfile.write(json.dumps(result).encode())
 
     def log_message(self, format, *args):
