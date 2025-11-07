@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lyria Clip Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-color: #6a11cb;
+            --secondary-color: #2575fc;
+            --green-color: #1ed760;
+            --red-color: #dc3545; /* For delete */
+            --yellow-color: #ffc107;
+            --card-bg: #ffffff;
+            --text-color: #333;
+            --text-light: #777;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            margin: 0;
+            padding: 40px 20px;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background-color: var(--card-bg);
+            border-radius: 16px;
+            padding: 2.5rem 3rem;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+        }
+        .header { text-align: center; margin-bottom: 2rem; }
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-color);
+            margin: 0 0 0.5rem 0;
+        }
+        .header h1 span {
+            background: -webkit-linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header p { color: var(--text-light); font-size: 1rem; margin: 0; }
+        
+        /* Form Styling */
+        label { text-align: left; display: block; font-weight: 500; color: var(--text-color); margin-bottom: 8px; }
+        textarea, input[type="number"] {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 14px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            font-family: 'Inter', sans-serif;
+            font-size: 1rem;
+            margin-bottom: 15px;
+            resize: vertical;
+        }
+        textarea { min-height: 100px; }
+        
+        /* Button Styling */
+        button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            width: 100%;
+            margin-top: 10px;
+            transition: all 0.2s ease;
+        }
+        button:disabled { background: #aaa; cursor: not-allowed; opacity: 0.7; }
+        #generate-btn {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        #merge-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        .delete-btn {
+            background: var(--red-color);
+            color: white;
+            font-size: 0.8rem;
+            padding: 6px 12px;
+            width: auto;
+            margin-top: 10px;
+        }
+
+        .hidden { display: none; }
+        hr { border: none; border-top: 1px solid #eee; margin: 2rem 0; }
+
+        /* Results Styling */
+        #status-text {
+            text-align: center;
+            font-weight: 500;
+            color: var(--text-light);
+            min-height: 1.2em;
+            margin-top: 20px;
+        }
+
+        /* Playback Controls Styling */
+        .playback-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            padding: 20px 0;
+        }
+        .playback-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        .playback-buttons button {
+            width: auto;
+            padding: 10px 20px;
+            margin: 0;
+        }
+        #play-btn {
+            background: linear-gradient(135deg, var(--green-color) 0%, #1db954 100%);
+            color: white;
+        }
+        #pause-btn {
+            background: linear-gradient(135deg, var(--yellow-color) 0%, #ff9800 100%);
+            color: white;
+        }
+        #stop-btn {
+            background: linear-gradient(135deg, var(--red-color) 0%, #c62828 100%);
+            color: white;
+        }
+        .time-display {
+            text-align: center;
+            font-weight: 500;
+            color: var(--text-color);
+        }
+        #progress-slider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #ddd;
+            outline: none;
+            cursor: pointer;
+        }
+        #progress-slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            cursor: pointer;
+        }
+        #progress-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--primary-color);
+            cursor: pointer;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Lyria <span>Clip Studio</span></h1>
+            <p>Generate and layer music compositions cumulatively.</p>
+        </div>
+        
+        <div id="controls-container">
+            <label for="prompt-input">Your Prompt:</label>
+            <textarea id="prompt-input" placeholder="e.g., A cinematic, orchestral score..."></textarea>
+            
+            <label for="duration-input">Duration (in seconds):</label>
+            <input type="number" id="duration-input" value="10" min="1">
+            
+            <button id="generate-btn">Generate</button>
+        </div>
+
+        <p id="status-text"></p>
+
+        <!-- Playback Controls (hidden by default) -->
+        <div id="playback-controls" class="hidden">
+            <hr>
+            <div class="playback-container">
+                <div class="playback-buttons">
+                    <button id="play-btn">Play</button>
+                    <button id="pause-btn">Pause</button>
+                    <button id="stop-btn">Stop</button>
+                </div>
+                <div class="time-display">
+                    <span id="current-time">0:00</span> / <span id="total-time">0:00</span>
+                </div>
+                <input type="range" id="progress-slider" min="0" max="100" value="0" step="0.1">
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Global State ---
+        let audioClips = []; // Store all generated audio clips
+        let audioContext = null;
+        let masterGainNode = null;
+        let sourceNodes = []; // Track all playing source nodes
+        let isPlaying = false;
+        let currentTime = 0;
+        let totalDuration = 0;
+        let updateInterval = null;
+        let startTime = 0; // Track when playback started
+
+        // --- DOM Elements ---
+        const generateBtn = document.getElementById('generate-btn');
+        const promptInput = document.getElementById('prompt-input');
+        const durationInput = document.getElementById('duration-input');
+        const statusText = document.getElementById('status-text');
+        const playbackControls = document.getElementById('playback-controls');
+        const playBtn = document.getElementById('play-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const progressSlider = document.getElementById('progress-slider');
+        const currentTimeDisplay = document.getElementById('current-time');
+        const totalTimeDisplay = document.getElementById('total-time');
+
+        // Initialize Web Audio API
+        function initAudioContext() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                masterGainNode = audioContext.createGain();
+                masterGainNode.connect(audioContext.destination);
+            }
+        }
+
+        // --- Event Listeners ---
+
+        /**
+         * Generate new music clip and layer it with existing music
+         */
+        generateBtn.addEventListener('click', async () => {
+            const prompt = promptInput.value;
+            const duration = parseInt(durationInput.value, 10);
+
+            if (!prompt) {
+                alert('Please enter a prompt.');
+                return;
+            }
+
+            setLoading(true);
+            statusText.textContent = "Generating music... this may take a moment.";
+
+            try {
+                const response = await fetch('/generate_clip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt, duration })
+                });
+
+                if (!response.ok) throw new Error(`Server error: ${response.statusText}`);
+                const data = await response.json();
+
+                // Initialize audio context if needed
+                if (!audioContext) {
+                    initAudioContext();
+                }
+
+                // Store the new clip
+                const clipIndex = audioClips.length;
+                audioClips.push({
+                    url: data.url,
+                    buffer: null, // Will be loaded when needed
+                    duration: duration
+                });
+
+                // Load the audio buffer (deferred - will load when play is clicked)
+                // This prevents auto-loading and auto-playing
+                
+                statusText.textContent = "Music generated successfully! Ready to play.";
+                
+                // Update total duration if this clip is longer
+                if (duration > totalDuration) {
+                    totalDuration = duration;
+                    updateTotalTimeDisplay();
+                }
+
+            } catch (error) {
+                console.error("Generation Error:", error);
+                statusText.textContent = `Error: ${error.message}`;
+            } finally {
+                setLoading(false);
+            }
+        });
+
+        /**
+         * Play all layered audio clips
+         */
+        playBtn.addEventListener('click', async () => {
+            if (audioClips.length === 0) {
+                alert('Please generate some music first.');
+                return;
+            }
+
+            if (!audioContext) {
+                initAudioContext();
+            }
+
+            // Resume audio context if suspended
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            // Stop any currently playing audio
+            stopAllAudio();
+
+            // Load all audio buffers if not already loaded
+            for (let i = 0; i < audioClips.length; i++) {
+                if (!audioClips[i].buffer) {
+                    await loadAudioBuffer(audioClips[i].url, i);
+                }
+            }
+
+            // Play all clips simultaneously (layered) from currentTime position
+            const maxDuration = Math.max(...audioClips.map(clip => clip.duration));
+            totalDuration = maxDuration;
+            updateTotalTimeDisplay();
+
+            sourceNodes = [];
+            audioClips.forEach((clip, index) => {
+                if (clip.buffer) {
+                    const source = audioContext.createBufferSource();
+                    source.buffer = clip.buffer;
+                    source.connect(masterGainNode);
+                    // Start from currentTime position (for resume/seek)
+                    const offset = Math.min(currentTime, clip.buffer.duration);
+                    source.start(0, offset);
+                    sourceNodes.push(source);
+                }
+            });
+
+            isPlaying = true;
+            startTime = audioContext.currentTime - currentTime;
+            showPlaybackControls();
+            updatePlaybackUI();
+            startTimeUpdate();
+        });
+
+        /**
+         * Pause playback
+         */
+        pauseBtn.addEventListener('click', () => {
+            if (!isPlaying) return;
+            
+            stopAllAudio();
+            isPlaying = false;
+            updatePlaybackUI();
+            stopTimeUpdate();
+        });
+
+        /**
+         * Stop playback and reset
+         */
+        stopBtn.addEventListener('click', () => {
+            stopAllAudio();
+            isPlaying = false;
+            currentTime = 0;
+            updatePlaybackUI();
+            updateProgressSlider();
+            stopTimeUpdate();
+        });
+
+        /**
+         * Seek when slider is moved
+         */
+        progressSlider.addEventListener('input', (e) => {
+            if (totalDuration > 0) {
+                const newTime = (e.target.value / 100) * totalDuration;
+                if (!isPlaying) {
+                    // If paused, just update the time
+                    currentTime = newTime;
+                    updateCurrentTimeDisplay();
+                } else {
+                    // If playing, seek to new position
+                    currentTime = newTime;
+                    // Restart playback from new position
+                    stopAllAudio();
+                    audioClips.forEach((clip) => {
+                        if (clip.buffer) {
+                            const source = audioContext.createBufferSource();
+                            source.buffer = clip.buffer;
+                            source.connect(masterGainNode);
+                            const offset = Math.min(currentTime, clip.buffer.duration);
+                            source.start(0, offset);
+                            sourceNodes.push(source);
+                        }
+                    });
+                    startTime = audioContext.currentTime - currentTime;
+                }
+            }
+        });
+
+        // --- Helper Functions ---
+
+        function setLoading(isLoading) {
+            generateBtn.disabled = isLoading;
+        }
+
+        /**
+         * Load audio buffer from URL
+         */
+        async function loadAudioBuffer(url, index) {
+            try {
+                const response = await fetch(url);
+                const arrayBuffer = await response.arrayBuffer();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                audioClips[index].buffer = audioBuffer;
+                return audioBuffer;
+            } catch (error) {
+                console.error('Error loading audio buffer:', error);
+                throw error;
+            }
+        }
+
+        /**
+         * Stop all playing audio sources
+         */
+        function stopAllAudio() {
+            sourceNodes.forEach(source => {
+                try {
+                    source.stop();
+                } catch (e) {
+                    // Source might already be stopped
+                }
+            });
+            sourceNodes = [];
+        }
+
+        /**
+         * Show playback controls
+         */
+        function showPlaybackControls() {
+            playbackControls.classList.remove('hidden');
+        }
+
+        /**
+         * Update playback UI state
+         */
+        function updatePlaybackUI() {
+            playBtn.disabled = isPlaying;
+            pauseBtn.disabled = !isPlaying;
+            stopBtn.disabled = !isPlaying && currentTime === 0;
+        }
+
+        /**
+         * Start time update interval
+         */
+        function startTimeUpdate() {
+            stopTimeUpdate(); // Clear any existing interval
+            updateInterval = setInterval(() => {
+                if (isPlaying && audioContext) {
+                    currentTime = audioContext.currentTime - startTime;
+                    if (currentTime >= totalDuration) {
+                        // Reached end
+                        stopAllAudio();
+                        isPlaying = false;
+                        currentTime = totalDuration;
+                        stopTimeUpdate();
+                        updatePlaybackUI();
+                    }
+                    updateCurrentTimeDisplay();
+                    updateProgressSlider();
+                }
+            }, 100);
+        }
+
+        /**
+         * Stop time update interval
+         */
+        function stopTimeUpdate() {
+            if (updateInterval) {
+                clearInterval(updateInterval);
+                updateInterval = null;
+            }
+        }
+
+        /**
+         * Update current time display
+         */
+        function updateCurrentTimeDisplay() {
+            const minutes = Math.floor(currentTime / 60);
+            const seconds = Math.floor(currentTime % 60);
+            currentTimeDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        /**
+         * Update total time display
+         */
+        function updateTotalTimeDisplay() {
+            const minutes = Math.floor(totalDuration / 60);
+            const seconds = Math.floor(totalDuration % 60);
+            totalTimeDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        /**
+         * Update progress slider
+         */
+        function updateProgressSlider() {
+            if (totalDuration > 0) {
+                progressSlider.value = (currentTime / totalDuration) * 100;
+            }
+        }
+
+        // Initialize audio context on first user interaction
+        document.addEventListener('click', () => {
+            if (!audioContext) {
+                initAudioContext();
+            }
+        }, { once: true });
+    </script>
+</body>
+</html>
